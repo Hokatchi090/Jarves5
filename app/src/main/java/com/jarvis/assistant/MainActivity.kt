@@ -22,6 +22,7 @@ import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -103,7 +104,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             == PackageManager.PERMISSION_GRANTED
         ) {
-            enableContinuousMode()
+            enableContinuousMode(startImmediately = false)
         }
     }
 
@@ -115,7 +116,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun enableContinuousMode() {
+    private fun enableContinuousMode(startImmediately: Boolean = true) {
         continuousMode = true
         val button = findViewById<Button>(R.id.micButton)
         button.text = "\u23F9\uFE0F"
@@ -123,7 +124,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         findViewById<View>(R.id.statusDot).setBackgroundResource(R.drawable.status_dot)
         findViewById<View>(R.id.statusDot).alpha = 1f
         startPulseAnimation(button)
-        startListening()
+        if (startImmediately) startListening()
     }
 
     private fun disableContinuousMode(button: Button) {
@@ -132,7 +133,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         statusText.text = "\u062C\u0627\u0647\u0632 \u0644\u0644\u0627\u0633\u062A\u0645\u0627\u0639"
         findViewById<View>(R.id.statusDot).alpha = 0.3f
         stopPulseAnimation(button)
-        log("\u062A\u0648\u0642\u0641 \u0648\u0636\u0639 \u0627\u0644\u0627\u0633\u062A\u0645\u0627\u0639 \u0627\u0644\u0645\u0633\u062A\u0645\u0631")
+        speechRecognizer?.stopListening()
     }
 
     private fun startPulseAnimation(view: View) {
@@ -158,8 +159,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts.language = Locale("ar")
-            tts.setPitch(0.7f)
-            tts.setSpeechRate(0.95f)
+            tts.setPitch(0.6f)
+            tts.setSpeechRate(0.88f)
             val arabicVoices = tts.voices?.filter { it.locale.language == "ar" }
             val maleVoice = arabicVoices?.firstOrNull { voice ->
                 val n = voice.name.lowercase(Locale.ROOT)
@@ -169,6 +170,28 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (maleVoice != null) {
                 tts.voice = maleVoice
             }
+
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) {
+                    runOnUiThread {
+                        if (continuousMode && !lectureMode) startListening()
+                    }
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    runOnUiThread {
+                        if (continuousMode && !lectureMode) startListening()
+                    }
+                }
+            })
+
+            val greeting = if (userName.isNotBlank()) {
+                "\u0623\u0647\u0644\u0627 ${userName}\u060C \u0623\u0646\u0627 \u062C\u0627\u0631\u0641\u0633 \u062A\u062D\u062A \u0627\u0644\u062E\u062F\u0645\u0629\u060C \u0634\u0648 \u0627\u0644\u062E\u062F\u0645\u0629 \u0627\u0644\u064A\u0648\u0645\u061F"
+            } else {
+                "\u0623\u0646\u0627 \u062C\u0627\u0631\u0641\u0633 \u062A\u062D\u062A \u0627\u0644\u062E\u062F\u0645\u0629\u060C \u0634\u0648 \u0627\u0644\u062E\u062F\u0645\u0629 \u0627\u0644\u064A\u0648\u0645\u061F"
+            }
+            respond(greeting)
         }
     }
 
@@ -257,7 +280,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 stopLectureModeAndSummarize()
             } else if (spoken.isNotBlank()) {
                 lectureBuffer.append(spoken).append(". ")
-                log("\uD83D\uDCDD $spoken")
             }
             if (continuousMode) startListening()
             return
@@ -274,12 +296,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             if (wakeIndex != -1) {
                 val commandOnly = spoken.substring(wakeIndex.coerceAtMost(spoken.length)).trim()
-                log("\u0623\u0646\u062A: $commandOnly")
-                if (commandOnly.isNotBlank()) handleCommand(commandOnly)
+                if (commandOnly.isNotBlank()) {
+                    handleCommand(commandOnly)
+                } else if (continuousMode) {
+                    startListening()
+                }
+            } else {
+                startListening()
             }
-            if (continuousMode) startListening()
         } else if (spoken.isNotBlank()) {
-            log("\u0623\u0646\u062A: $spoken")
             handleCommand(spoken)
         }
     }
@@ -696,7 +721,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             "application/json".toMediaTypeOrNull(),
             jsonBody.toString()
         )
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
         val request = Request.Builder()
             .url(url)
             .addHeader("Content-Type", "application/json")
@@ -869,7 +894,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             ))
         }
         val body = RequestBody.create("application/json".toMediaTypeOrNull(), jsonBody.toString())
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
         val request = Request.Builder()
             .url(url)
             .addHeader("Content-Type", "application/json")
@@ -1198,7 +1223,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             ))
         }
         val body = RequestBody.create("application/json".toMediaTypeOrNull(), jsonBody.toString())
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
         val request = Request.Builder()
             .url(url)
             .addHeader("Content-Type", "application/json")
@@ -1261,7 +1286,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             ))
         }
         val body = RequestBody.create("application/json".toMediaTypeOrNull(), jsonBody.toString())
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
         val request = Request.Builder()
             .url(url)
             .addHeader("Content-Type", "application/json")
@@ -1620,7 +1645,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun respond(text: String) {
         log("\u062C\u0627\u0631\u0641\u0633: $text")
-        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+        speechRecognizer?.stopListening()
+        val utteranceId = "jarvis_${System.currentTimeMillis()}"
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
     }
 
     private fun log(text: String) {
