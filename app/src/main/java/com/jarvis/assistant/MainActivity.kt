@@ -97,9 +97,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         speechRecognizer?.setRecognitionListener(recognitionListener)
 
-        findViewById<Button>(R.id.micButton).setOnClickListener {
-            toggleContinuousMode(it as Button)
+        findViewById<View>(R.id.micButton).setOnClickListener {
+            toggleContinuousMode()
         }
+        startDialRotation()
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             == PackageManager.PERMISSION_GRANTED
@@ -108,9 +109,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun toggleContinuousMode(button: Button) {
+    private fun toggleContinuousMode() {
         if (continuousMode) {
-            disableContinuousMode(button)
+            disableContinuousMode()
         } else {
             enableContinuousMode()
         }
@@ -118,21 +119,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun enableContinuousMode(startImmediately: Boolean = true) {
         continuousMode = true
-        val button = findViewById<Button>(R.id.micButton)
-        button.text = "\u23F9\uFE0F"
+        val container = findViewById<View>(R.id.micButton)
+        findViewById<TextView>(R.id.micIcon).text = "\u23F9\uFE0F"
         statusText.text = "\u0628\u0633\u0645\u0639\u0643... \u0642\u0648\u0644 \"\u062C\u0627\u0631\u0641\u0633\""
         findViewById<View>(R.id.statusDot).setBackgroundResource(R.drawable.status_dot)
         findViewById<View>(R.id.statusDot).alpha = 1f
-        startPulseAnimation(button)
+        startPulseAnimation(container)
         if (startImmediately) startListening()
     }
 
-    private fun disableContinuousMode(button: Button) {
+    private fun disableContinuousMode() {
         continuousMode = false
-        button.text = "\uD83C\uDF99\uFE0F"
+        val container = findViewById<View>(R.id.micButton)
+        findViewById<TextView>(R.id.micIcon).text = "\uD83C\uDF99\uFE0F"
         statusText.text = "\u062C\u0627\u0647\u0632 \u0644\u0644\u0627\u0633\u062A\u0645\u0627\u0639"
         findViewById<View>(R.id.statusDot).alpha = 0.3f
-        stopPulseAnimation(button)
+        stopPulseAnimation(container)
         speechRecognizer?.stopListening()
     }
 
@@ -154,6 +156,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         pulseAnimator?.cancel()
         view.scaleX = 1f
         view.scaleY = 1f
+    }
+
+    private fun startDialRotation() {
+        val dial = findViewById<JarvisDialView>(R.id.jarvisDial)
+        val animator = android.animation.ValueAnimator.ofFloat(0f, 360f)
+        animator.duration = 6000
+        animator.repeatCount = android.animation.ValueAnimator.INFINITE
+        animator.interpolator = android.view.animation.LinearInterpolator()
+        animator.addUpdateListener { anim ->
+            dial.setTickRotation(anim.animatedValue as Float)
+        }
+        animator.start()
     }
 
     override fun onInit(status: Int) {
@@ -236,16 +250,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun startListening() {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, currentLangCode)
+        intent.putExtra(
+            RecognizerIntent.EXTRA_LANGUAGE,
+            if (currentLangCode == "ar") "ar-DZ" else currentLangCode
+        )
         intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         try {
             speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
             continuousMode = false
-            val button = findViewById<Button>(R.id.micButton)
-            button.text = "\uD83C\uDF99\uFE0F"
+            val container = findViewById<View>(R.id.micButton)
+            findViewById<TextView>(R.id.micIcon).text = "\uD83C\uDF99\uFE0F"
             statusText.text = "\u062C\u0627\u0647\u0632 \u0644\u0644\u0627\u0633\u062A\u0645\u0627\u0639"
-            stopPulseAnimation(button)
+            stopPulseAnimation(container)
             log("\u0645\u0627 \u0642\u062F\u0631\u062A \u0623\u0628\u0644\u0634 \u0627\u0644\u0627\u0633\u062A\u0645\u0627\u0639")
         }
     }
@@ -315,7 +332,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         try {
             handleCommandInternal(text)
         } catch (e: Exception) {
-            respond("\u0635\u0627\u0631 \u062E\u0637\u0623 \u0628\u0633\u064A\u0637\u060C \u0628\u0633 \u0623\u0646\u0627 \u0644\u0633\u0627 \u0634\u063A\u0627\u0644\u060C \u062C\u0631\u0628 \u0623\u0645\u0631 \u062A\u0627\u0646\u064A")
+            respond("\u0645\u0627 \u0641\u0647\u0645\u062A\u0634")
         }
     }
 
@@ -682,7 +699,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             askGemini(cmd)
             return "\u0628\u0641\u0643\u0631..."
         }
-        return "\u0645\u0627 \u0641\u0647\u0645\u062A \u0639\u0644\u064A\u0643 \u062A\u0645\u0627\u0645\u064B\u0627\u060C \u062C\u0631\u0628 \u0635\u064A\u063A\u0629 \u062A\u0627\u0646\u064A\u0629"
+        return "\u0645\u0627 \u0641\u0647\u0645\u062A\u0634"
     }
 
     private fun offlineRules(cmd: String): String? {
@@ -704,9 +721,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun askGemini(message: String) {
         val nameContext = if (userName.isNotBlank()) "\u0627\u0633\u0645\u064A ${userName}\u060C \u062E\u0627\u0637\u0628\u0646\u064A \u0628\u0627\u0633\u0645\u064A \u0623\u062D\u064A\u0627\u0646\u064B\u0627. " else ""
-        val identityContext = "\u0623\u0646\u062A \u062C\u0627\u0631\u0641\u0633\u060C \u0645\u0633\u0627\u0639\u062F \u0634\u062E\u0635\u064A \u0628\u0634\u062E\u0635\u064A\u0629 \u0648\u0627\u062D\u062F\u0629 \u0645\u0648\u062D\u062F\u0629 \u0628\u0643\u0644 \u0627\u0644\u0644\u063A\u0627\u062A\u060C \u062C\u0627\u0648\u0628 \u0628\u0646\u0641\u0633 \u0627\u0644\u0644\u063A\u0629 \u064A\u0644\u064A \u0625\u062C\u0627\u0643 \u0641\u064A\u0647\u0627 \u0627\u0644\u0633\u0624\u0627\u0644. "
-        val promptWithStyle = "$identityContext$nameContext" +
-                "\u062C\u0627\u0648\u0628\u0646\u064A \u0628\u0623\u0633\u0644\u0648\u0628 \u0637\u0628\u064A\u0639\u064A \u0648\u062F\u0627\u0641\u0626 \u0648\u0642\u0631\u064A\u0628 \u0645\u0646 \u0644\u0647\u062C\u0629 \u0627\u0644\u062D\u0643\u064A \u0627\u0644\u0639\u0627\u062F\u064A\u060C \u0631\u062F\u0648\u062F \u0642\u0635\u064A\u0631\u0629 \u0648\u0645\u0641\u0647\u0648\u0645\u0629\u060C \u0645\u0646 \u063A\u064A\u0631 \u0631\u0633\u0645\u064A\u0627\u062A \u0632\u0627\u064A\u062F\u0629: $message"
+        val identityContext = "\u0623\u0646\u062A \u062C\u0627\u0631\u0641\u0633\u060C \u0645\u0633\u0627\u0639\u062F \u0634\u062E\u0635\u064A \u0628\u0634\u062E\u0635\u064A\u0629 \u0648\u0627\u062D\u062F\u0629 \u0645\u0648\u062D\u062F\u0629 \u0628\u0643\u0644 \u0627\u0644\u0644\u063A\u0627\u062A. "
+        val languageRule = "\u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0644\u063A\u0629: \u0625\u0630\u0627 \u0643\u0627\u0646 \u0627\u0644\u0633\u0624\u0627\u0644 \u0645\u062E\u0644\u0648\u0637 \u0628\u064A\u0646 \u0627\u0644\u0639\u0631\u0628\u064A\u0629 \u0648\u0644\u063A\u0629 \u062A\u0627\u0646\u064A\u0629 (\u0645\u062A\u0644 \u0639\u0631\u0628\u064A \u0645\u0639 \u0625\u0646\u062C\u0644\u064A\u0632\u064A \u0623\u0648 \u0641\u0631\u0646\u0633\u0627\u0648\u064A)\u060C \u062C\u0627\u0648\u0628 \u0628\u0627\u0644\u0639\u0631\u0628\u064A \u0628\u0633. \u0625\u0630\u0627 \u0643\u0627\u0646 \u0627\u0644\u0633\u0624\u0627\u0644 \u0628\u0644\u063A\u0629 \u0648\u062D\u062F\u0629 \u0635\u0627\u0641\u064A\u0629 \u0628\u062F\u0648\u0646 \u062E\u0644\u0637\u060C \u062C\u0627\u0648\u0628 \u0628\u0646\u0641\u0633 \u0647\u0627\u064A \u0627\u0644\u0644\u063A\u0629. "
+        val styleRule = "\u062C\u0627\u0648\u0628\u0646\u064A \u0628\u0627\u0644\u0644\u0647\u062C\u0629 \u0627\u0644\u062C\u0632\u0627\u0626\u0631\u064A\u0629 \u0627\u0644\u0639\u0627\u0645\u064A\u0629 \u0627\u0644\u0637\u0628\u064A\u0639\u064A\u0629\u060C \u0628\u062C\u0645\u0644 \u0642\u0635\u064A\u0631\u0629 \u0648\u0648\u0627\u0636\u062D\u0629 \u0648\u0628\u0633\u064A\u0637\u0629\u060C \u0628\u062F\u0648\u0646 \u062A\u0639\u0642\u064A\u062F \u0648\u0644\u0627 \u0631\u0633\u0645\u064A\u0627\u062A \u0632\u0627\u064A\u062F\u0629\u060C \u0648\u0628\u062F\u0648\u0646 \u0643\u0644\u0645\u0627\u062A \u0641\u0635\u062D\u0649 \u0635\u0639\u0628\u0629. "
+        val promptWithStyle = "$identityContext$languageRule$styleRule$nameContext$message"
+
         val jsonBody = JSONObject().apply {
             put("contents", JSONArray().put(
                 JSONObject().apply {
