@@ -84,24 +84,34 @@
             android:lineSpacingExtra="6dp" />
     </ScrollView>
 
-    <!-- Mic button -->
+    <!-- Mic dial -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center"
         android:paddingBottom="16dp">
 
-        <Button
+        <FrameLayout
             android:id="@+id/micButton"
-            android:layout_width="120dp"
-            android:layout_height="120dp"
-            android:background="@drawable/mic_button_background"
-            android:elevation="12dp"
-            android:text="\uD83C\uDF99\uFE0F"
-            android:textSize="36sp"
-            android:textColor="@color/jarvis_text_primary"
-            android:includeFontPadding="false"
-            android:stateListAnimator="@null" />
+            android:layout_width="150dp"
+            android:layout_height="150dp"
+            android:clickable="true"
+            android:focusable="true">
+
+            <com.jarvis.assistant.JarvisDialView
+                android:id="@+id/jarvisDial"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <TextView
+                android:id="@+id/micIcon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="\uD83C\uDF99\uFE0F"
+                android:textSize="34sp"
+                android:includeFontPadding="false" />
+        </FrameLayout>
     </LinearLayout>
 
     <TextView
