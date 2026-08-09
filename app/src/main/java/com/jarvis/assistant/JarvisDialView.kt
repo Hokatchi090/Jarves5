@@ -111,7 +111,7 @@ class JarvisDialView @JvmOverloads constructor(
         val energy = if (speaking) {
             1f + voiceLevel * 0.30f
         } else {
-            1f + 0.04f * sin(elapsed * 2.0)
+            1f + 0.04f * sin(elapsed * 2.0f)
         }
 
         val rings = arrayOf(
