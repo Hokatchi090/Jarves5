@@ -57,6 +57,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var speechRecognizer: SpeechRecognizer? = null
     private var currentLangCode = "ar"
     private var pulseAnimator: ObjectAnimator? = null
+    private lateinit var jarvisDial: JarvisDialView
+    private lateinit var jarvisDial: JarvisDialView
     private var userName: String = ""
     private var lectureMode = false
     private var lectureBuffer = StringBuilder()
@@ -65,7 +67,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // ---- \u0636\u064A\u0641 \u0645\u0641\u062A\u0627\u062D Google Gemini \u0627\u0644\u062E\u0627\u0635 \u0641\u064A\u0643 \u0647\u0648\u0646 \u0628\u064A\u0646 \u0639\u0644\u0627\u0645\u062A\u064A \u0627\u0644\u062A\u0646\u0635\u064A\u0635 ----
     // \u0627\u062D\u0635\u0644 \u0639\u0644\u064A\u0647 \u0645\u062C\u0627\u0646\u064B\u0627 \u0645\u0646: https://aistudio.google.com/apikey
     // \u062E\u0644\u064A\u0647 \u0641\u0627\u0636\u064A "" \u0625\u0630\u0627 \u0628\u062F\u0643 \u062A\u0628\u0642\u064A \u062C\u0627\u0631\u0641\u0633 \u0623\u0648\u0641\u0644\u0627\u064A\u0646 \u0628\u0627\u0644\u0643\u0627\u0645\u0644
-    private val GEMINI_API_KEY = "AQ.Ab8RN6LgH3zeyTqUtRWkHS-0CvJZccqUBh-AWTjpe97ieIevjg"
+    private val GEMINI_API_KEY = "AQ.Ab8RN6I6vqRW4nOUpgsViYy8XTMZzyWDagN2VNz8NPXqBvK1fw"
 
     // ---- \u0636\u064A\u0641 \u0645\u0641\u062A\u0627\u062D Google Maps \u0647\u0648\u0646 \u0644\u0645\u0633\u0627\u0641\u0627\u062A \u062D\u0642\u064A\u0642\u064A\u0629 \u0628\u0627\u0644\u0637\u0631\u064A\u0642 ----
     // \u0627\u062D\u0635\u0644 \u0639\u0644\u064A\u0647 \u0645\u0646: https://console.cloud.google.com/google/maps-apis
@@ -81,6 +83,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        jarvisDial = findViewById(R.id.jarvisDial)
 
         statusText = findViewById(R.id.statusText)
         logText = findViewById(R.id.logText)
@@ -100,7 +103,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         findViewById<View>(R.id.micButton).setOnClickListener {
             toggleContinuousMode()
         }
-        startDialRotation()
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             == PackageManager.PERMISSION_GRANTED
@@ -186,15 +188,27 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {}
+                override fun onStart(utteranceId: String?) {
+                    runOnUiThread {
+                        if (::jarvisDial.isInitialized) {
+                            jarvisDial.setSpeaking(true)
+                        }
+                    }
+                }
                 override fun onDone(utteranceId: String?) {
                     runOnUiThread {
+                        if (::jarvisDial.isInitialized) {
+                            jarvisDial.setSpeaking(false)
+                        }
                         if (continuousMode && !lectureMode) startListening()
                     }
                 }
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String?) {
                     runOnUiThread {
+                        if (::jarvisDial.isInitialized) {
+                            jarvisDial.setSpeaking(false)
+                        }
                         if (continuousMode && !lectureMode) startListening()
                     }
                 }
@@ -270,7 +284,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val recognitionListener = object : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) {}
         override fun onBeginningOfSpeech() {}
-        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onRmsChanged(rmsdB: Float) {
+            val level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+            runOnUiThread {
+                if (::jarvisDial.isInitialized) {
+                    jarvisDial.setVoiceLevel(level)
+                }
+            }
+        }
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {}
 
