@@ -58,7 +58,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var currentLangCode = "ar"
     private var pulseAnimator: ObjectAnimator? = null
     private lateinit var jarvisDial: JarvisDialView
-    private lateinit var jarvisDial: JarvisDialView
     private var userName: String = ""
     private var lectureMode = false
     private var lectureBuffer = StringBuilder()
@@ -160,17 +159,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         view.scaleY = 1f
     }
 
-    private fun startDialRotation() {
-        val dial = findViewById<JarvisDialView>(R.id.jarvisDial)
-        val animator = android.animation.ValueAnimator.ofFloat(0f, 360f)
-        animator.duration = 6000
-        animator.repeatCount = android.animation.ValueAnimator.INFINITE
-        animator.interpolator = android.view.animation.LinearInterpolator()
-        animator.addUpdateListener { anim ->
-            dial.setTickRotation(anim.animatedValue as Float)
-        }
-        animator.start()
-    }
+    // \u0645\u0644\u0627\u062D\u0638\u0629: JarvisDialView \u0627\u0644\u062C\u062F\u064A\u062F \u064A\u062D\u0631\u0643 \u0646\u0641\u0633\u0647 \u062F\u0627\u062E\u0644\u064A\u064B\u0627 \u0639\u0628\u0631 postInvalidateOnAnimation()\u060C \u0641\u0645\u0627 \u0639\u0627\u062F \u0641\u064A\u0647 \u062D\u0627\u062C\u0629 \u0644\u062F\u0648\u0627\u0644 \u062A\u062F\u0648\u064A\u0631 \u062E\u0627\u0631\u062C\u064A\u0629
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
