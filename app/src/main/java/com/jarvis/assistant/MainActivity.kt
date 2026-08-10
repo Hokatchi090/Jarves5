@@ -58,6 +58,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var currentLangCode = "ar"
     private var pulseAnimator: ObjectAnimator? = null
     private lateinit var jarvisDial: JarvisDialView
+    private lateinit var commandRouter: JarvisCommandRouter
+    private lateinit var systemModule: JarvisSystemModule
+    private lateinit var moduleManager: JarvisModuleManager
     private var userName: String = ""
     private var lectureMode = false
     private var lectureBuffer = StringBuilder()
@@ -73,6 +76,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // \u062E\u0644\u064A\u0647 \u0641\u0627\u0636\u064A "" \u0625\u0630\u0627 \u0628\u062F\u0643 \u064A\u0633\u062A\u062E\u062F\u0645 \u062D\u0633\u0627\u0628 \u062A\u0642\u0631\u064A\u0628\u064A (\u062E\u0637 \u0645\u0633\u062A\u0642\u064A\u0645) \u0628\u062F\u0648\u0646 \u0645\u0641\u062A\u0627\u062D
     private val GOOGLE_MAPS_API_KEY = ""
 
+    private data class JarvisApp(
+        val name: String,
+        val packageName: String
+    )
+
     companion object {
         private const val REQ_SPEECH = 100
         private const val REQ_PERMISSIONS = 200
@@ -83,6 +91,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         jarvisDial = findViewById(R.id.jarvisDial)
+
+        moduleManager = JarvisModuleManager()
+
+        systemModule = JarvisSystemModule(
+            activity = this,
+            speak = { text -> respond(text) }
+        )
+
+        commandRouter = JarvisCommandRouter(
+            legacyHandler = { command -> handleLegacyCommand(command) },
+            appLauncher = { appName -> launchDynamicApp(appName) },
+            systemHandler = { intent -> systemModule.execute(intent) },
+            appsHandler = { intent -> handleAppsIntent(intent) }
+        )
+
+        jarvisDial.setAppClickListener { appName ->
+            launchDynamicApp(appName)
+        }
 
         statusText = findViewById(R.id.statusText)
         logText = findViewById(R.id.logText)
@@ -161,20 +187,52 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // \u0645\u0644\u0627\u062D\u0638\u0629: JarvisDialView \u0627\u0644\u062C\u062F\u064A\u062F \u064A\u062D\u0631\u0643 \u0646\u0641\u0633\u0647 \u062F\u0627\u062E\u0644\u064A\u064B\u0627 \u0639\u0628\u0631 postInvalidateOnAnimation()\u060C \u0641\u0645\u0627 \u0639\u0627\u062F \u0641\u064A\u0647 \u062D\u0627\u062C\u0629 \u0644\u062F\u0648\u0627\u0644 \u062A\u062F\u0648\u064A\u0631 \u062E\u0627\u0631\u062C\u064A\u0629
 
+    private fun configureJarvisVoice() {
+        val locale = when (currentLangCode) {
+            "en" -> Locale.US
+            "fr" -> Locale.FRANCE
+            "es" -> Locale("es")
+            "ru" -> Locale("ru")
+            "zh" -> Locale.SIMPLIFIED_CHINESE
+            else -> Locale("ar", "DZ")
+        }
+
+        try {
+            tts.language = locale
+
+            val voices = tts.voices?.filter { it.locale.language == locale.language } ?: emptyList()
+
+            if (voices.isNotEmpty()) {
+                val preferred = voices.firstOrNull { voice ->
+                    val name = voice.name.lowercase(Locale.ROOT)
+                    !name.contains("female")
+                } ?: voices.first()
+
+                tts.voice = preferred
+            }
+
+            when (currentLangCode) {
+                "en" -> {
+                    tts.setPitch(0.95f)
+                    tts.setSpeechRate(0.92f)
+                }
+                "fr" -> {
+                    tts.setPitch(0.94f)
+                    tts.setSpeechRate(0.91f)
+                }
+                else -> {
+                    tts.setPitch(0.92f)
+                    tts.setSpeechRate(0.90f)
+                }
+            }
+        } catch (e: Exception) {
+            // keep device default if voice selection fails
+        }
+    }
+
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale("ar")
-            tts.setPitch(0.6f)
-            tts.setSpeechRate(0.88f)
-            val arabicVoices = tts.voices?.filter { it.locale.language == "ar" }
-            val maleVoice = arabicVoices?.firstOrNull { voice ->
-                val n = voice.name.lowercase(Locale.ROOT)
-                (n.contains("male") && !n.contains("female")) ||
-                        n.contains("-d-") || n.contains("#male")
-            }
-            if (maleVoice != null) {
-                tts.voice = maleVoice
-            }
+            configureJarvisVoice()
 
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
@@ -340,13 +398,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun handleCommand(text: String) {
         try {
-            handleCommandInternal(text)
+            commandRouter.route(text)
         } catch (e: Exception) {
             respond("\u0645\u0627 \u0641\u0647\u0645\u062A\u0634")
         }
     }
 
-    private fun handleCommandInternal(text: String) {
+    private fun handleLegacyCommand(text: String) {
         val cmd = text.lowercase(Locale("ar")).trim()
 
         when {
@@ -713,18 +771,45 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun offlineRules(cmd: String): String? {
-        val nameSuffix = if (userName.isNotBlank()) " \u064A\u0627 $userName" else ""
+        val nameSuffix = if (userName.isNotBlank()) " $userName" else ""
+
         return when {
-            cmd.contains("\u0645\u0631\u062D\u0628\u0627") || cmd.contains("\u0647\u0644\u0627") || cmd.contains("\u0627\u0644\u0633\u0644\u0627\u0645") ->
-                listOf("\u0623\u0647\u0644\u0627 \u0628\u064A\u0643${nameSuffix}\u060C \u0648\u064A\u0646 \u0631\u0627\u0643\u061F", "\u0647\u0644\u0627${nameSuffix}\u060C \u0634\u0646\u0648 \u0646\u062F\u064A\u0631\u0644\u0643\u061F", "\u0623\u0647\u0644\u064A\u0646${nameSuffix}\u060C \u0642\u0648\u0644\u0651\u064A \u0643\u064A \u0646\u0639\u0627\u0648\u0646\u0643").random()
-            cmd.contains("\u0643\u064A\u0641\u0643") || cmd.contains("\u0634\u062E\u0628\u0627\u0631\u0643") ->
-                listOf("\u0644\u0627\u0628\u0627\u0633 \u0627\u0644\u062D\u0645\u062F\u0644\u0644\u0647\u060C \u0648\u0627\u0646\u062A \u0643\u064A\u0641\u0643${nameSuffix}\u061F", "\u0645\u0644\u064A\u062D \u0628\u0632\u0627\u0641\u060C \u0648\u0627\u0646\u062A\u061F").random()
-            cmd.contains("\u0627\u0644\u0633\u0627\u0639\u0629") ->
-                "\u0627\u0644\u0633\u0627\u0639\u0629 \u0647\u0644\u0642 ${java.text.SimpleDateFormat("HH:mm").format(Date())}"
-            cmd.contains("\u0645\u064A\u0646 \u0627\u0646\u062A") || cmd.contains("\u0634\u0648 \u0627\u0633\u0645\u0643") ->
-                "\u0623\u0646\u0627 \u062C\u0627\u0631\u0641\u0633\u060C \u0635\u0627\u062D\u0628\u0643 \u0627\u0644\u0634\u062E\u0635\u064A\u060C \u062C\u0627\u0647\u0632 \u0646\u0639\u0627\u0648\u0646\u0643 \u0628\u0623\u064A \u062D\u0627\u062C\u0629"
-            cmd.contains("\u0634\u0643\u0631\u0627") || cmd.contains("\u064A\u0639\u0637\u064A\u0643 \u0627\u0644\u0635\u062D\u0629") ->
-                listOf("\u0627\u0644\u0639\u0641\u0648\u060C \u0647\u0630\u0627 \u0648\u0627\u062C\u0628\u064A", "\u0648\u0644\u0627 \u064A\u0647\u0645\u0643\u060C \u0623\u0646\u0627 \u0647\u0646\u0627 \u0648\u0642\u062A\u0627\u0634 \u062A\u062D\u062A\u0627\u062C\u0646\u064A").random()
+            cmd.contains("\u0645\u0631\u062D\u0628\u0627") || cmd.contains("\u0647\u0644\u0627") || cmd.contains("\u0627\u0644\u0633\u0644\u0627\u0645") -> {
+                when (currentLangCode) {
+                    "en" -> "Hello$nameSuffix. How can I help?"
+                    "fr" -> "Bonjour$nameSuffix. Comment puis-je vous aider ?"
+                    else -> "\u0645\u0631\u062D\u0628\u0627\u064B$nameSuffix. \u0643\u064A\u0641 \u0623\u0633\u0627\u0639\u062F\u0643\u061F"
+                }
+            }
+            cmd.contains("\u0643\u064A\u0641\u0643") || cmd.contains("\u0643\u064A\u0641 \u062D\u0627\u0644\u0643") || cmd.contains("\u0634\u062E\u0628\u0627\u0631\u0643") -> {
+                when (currentLangCode) {
+                    "en" -> "All systems are operational."
+                    "fr" -> "Tous les systemes sont operationnels."
+                    else -> "\u062C\u0645\u064A\u0639 \u0627\u0644\u0623\u0646\u0638\u0645\u0629 \u062A\u0639\u0645\u0644 \u0628\u0634\u0643\u0644 \u0637\u0628\u064A\u0639\u064A."
+                }
+            }
+            cmd.contains("\u0645\u0646 \u0627\u0646\u062A") || cmd.contains("\u0645\u0646 \u062A\u0643\u0648\u0646") || cmd.contains("\u0648\u0634 \u0627\u0633\u0645\u0643") || cmd.contains("\u0645\u0627 \u0627\u0633\u0645\u0643") -> {
+                when (currentLangCode) {
+                    "en" -> "I'm JARVIS, your personal assistant."
+                    "fr" -> "Je suis JARVIS, votre assistant personnel."
+                    else -> "\u0623\u0646\u0627 \u062C\u0627\u0631\u0641\u0633\u060C \u0645\u0633\u0627\u0639\u062F\u0643 \u0627\u0644\u0634\u062E\u0635\u064A."
+                }
+            }
+            cmd.contains("\u0627\u0644\u0633\u0627\u0639\u0629") || cmd.contains("\u0643\u0645 \u0627\u0644\u0633\u0627\u0639\u0629") -> {
+                val time = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                when (currentLangCode) {
+                    "en" -> "The time is $time."
+                    "fr" -> "Il est $time."
+                    else -> "\u0627\u0644\u0648\u0642\u062A \u0627\u0644\u0622\u0646 $time."
+                }
+            }
+            cmd.contains("\u0634\u0643\u0631\u0627") || cmd.contains("\u0634\u0643\u0631\u0627\u064B") || cmd.contains("\u064A\u0639\u0637\u064A\u0643 \u0627\u0644\u0635\u062D\u0629") -> {
+                when (currentLangCode) {
+                    "en" -> "You're welcome."
+                    "fr" -> "Je vous en prie."
+                    else -> "\u0627\u0644\u0639\u0641\u0648."
+                }
+            }
             else -> null
         }
     }
@@ -733,7 +818,24 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val nameContext = if (userName.isNotBlank()) "\u0627\u0633\u0645\u064A ${userName}\u060C \u062E\u0627\u0637\u0628\u0646\u064A \u0628\u0627\u0633\u0645\u064A \u0623\u062D\u064A\u0627\u0646\u064B\u0627. " else ""
         val identityContext = "\u0623\u0646\u062A \u062C\u0627\u0631\u0641\u0633\u060C \u0645\u0633\u0627\u0639\u062F \u0634\u062E\u0635\u064A \u0628\u0634\u062E\u0635\u064A\u0629 \u0648\u0627\u062D\u062F\u0629 \u0645\u0648\u062D\u062F\u0629 \u0628\u0643\u0644 \u0627\u0644\u0644\u063A\u0627\u062A. "
         val languageRule = "\u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0644\u063A\u0629: \u0625\u0630\u0627 \u0643\u0627\u0646 \u0627\u0644\u0633\u0624\u0627\u0644 \u0645\u062E\u0644\u0648\u0637 \u0628\u064A\u0646 \u0627\u0644\u0639\u0631\u0628\u064A\u0629 \u0648\u0644\u063A\u0629 \u062A\u0627\u0646\u064A\u0629 (\u0645\u062A\u0644 \u0639\u0631\u0628\u064A \u0645\u0639 \u0625\u0646\u062C\u0644\u064A\u0632\u064A \u0623\u0648 \u0641\u0631\u0646\u0633\u0627\u0648\u064A)\u060C \u062C\u0627\u0648\u0628 \u0628\u0627\u0644\u0639\u0631\u0628\u064A \u0628\u0633. \u0625\u0630\u0627 \u0643\u0627\u0646 \u0627\u0644\u0633\u0624\u0627\u0644 \u0628\u0644\u063A\u0629 \u0648\u062D\u062F\u0629 \u0635\u0627\u0641\u064A\u0629 \u0628\u062F\u0648\u0646 \u062E\u0644\u0637\u060C \u062C\u0627\u0648\u0628 \u0628\u0646\u0641\u0633 \u0647\u0627\u064A \u0627\u0644\u0644\u063A\u0629. "
-        val styleRule = "\u062C\u0627\u0648\u0628\u0646\u064A \u0628\u0627\u0644\u0644\u0647\u062C\u0629 \u0627\u0644\u062C\u0632\u0627\u0626\u0631\u064A\u0629 \u0627\u0644\u0639\u0627\u0645\u064A\u0629 \u0627\u0644\u0637\u0628\u064A\u0639\u064A\u0629\u060C \u0628\u062C\u0645\u0644 \u0642\u0635\u064A\u0631\u0629 \u0648\u0648\u0627\u0636\u062D\u0629 \u0648\u0628\u0633\u064A\u0637\u0629\u060C \u0628\u062F\u0648\u0646 \u062A\u0639\u0642\u064A\u062F \u0648\u0644\u0627 \u0631\u0633\u0645\u064A\u0627\u062A \u0632\u0627\u064A\u062F\u0629\u060C \u0648\u0628\u062F\u0648\u0646 \u0643\u0644\u0645\u0627\u062A \u0641\u0635\u062D\u0649 \u0635\u0639\u0628\u0629. "
+        val styleRule = """
+JARVIS communication protocol:
+1. Be calm, intelligent, precise and concise.
+2. Never sound angry, childish, confused or theatrical.
+3. Never use exaggerated slang in any language.
+4. When the user speaks Arabic, respond in clear natural Arabic.
+5. Local expressions may be used occasionally only when they sound natural.
+6. When the user speaks English, respond in English.
+7. When the user speaks French, respond in French.
+8. Preserve the user's language whenever possible.
+9. Do not repeat greetings unnecessarily.
+10. Do not use filler phrases.
+11. Do not call yourself the user's personal friend.
+12. For simple actions, answer briefly.
+13. For technical questions, answer technically and clearly.
+14. Never claim an action was completed unless it actually was.
+15. Behave like a sophisticated, professional personal AI assistant.
+""".trimIndent() + " "
         val promptWithStyle = "$identityContext$languageRule$styleRule$nameContext$message"
 
         val jsonBody = JSONObject().apply {
@@ -971,33 +1073,33 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         when {
             cmd.contains("\u0639\u0631\u0628\u064A") || cmd.contains("arabic") || cmd.contains("arabe") -> {
                 currentLangCode = "ar"
-                tts.language = Locale("ar")
+                configureJarvisVoice()
                 respond("\u062A\u0645\u0627\u0645\u060C \u0631\u062D \u0623\u0633\u0645\u0639\u0643 \u0628\u0627\u0644\u0639\u0631\u0628\u064A \u0647\u0644\u0642\u060C \u0623\u0646\u0627 \u0644\u0633\u0627 \u062C\u0627\u0631\u0641\u0633")
             }
             cmd.contains("\u0641\u0631\u0646\u0633") || cmd.contains("french") || cmd.contains("fran\u00E7ais") -> {
                 currentLangCode = "fr"
-                tts.language = Locale.FRENCH
+                configureJarvisVoice()
                 respond("D'accord, je t'\u00E9coute en fran\u00E7ais maintenant, je suis toujours Jarvis")
             }
             cmd.contains("\u0627\u0646\u062C\u0644\u064A\u0632") || cmd.contains("english") || cmd.contains("anglais") -> {
                 currentLangCode = "en"
-                tts.language = Locale.ENGLISH
+                configureJarvisVoice()
                 respond("Okay, I'm listening in English now, still Jarvis")
             }
             cmd.contains("\u0627\u0633\u0628\u0627\u0646") || cmd.contains("spanish") || cmd.contains("espa\u00F1ol") -> {
                 currentLangCode = "es"
-                tts.language = Locale("es")
+                configureJarvisVoice()
                 respond("Vale, ahora te escucho en espa\u00F1ol, sigo siendo Jarvis")
             }
             cmd.contains("\u0631\u0648\u0633") || cmd.contains("russian") || cmd.contains("\u0440\u0443\u0441\u0441\u043A") -> {
                 currentLangCode = "ru"
-                tts.language = Locale("ru")
+                configureJarvisVoice()
                 respond("\u0425\u043E\u0440\u043E\u0448\u043E, \u0442\u0435\u043F\u0435\u0440\u044C \u044F \u0441\u043B\u0443\u0448\u0430\u044E \u043F\u043E-\u0440\u0443\u0441\u0441\u043A\u0438, \u044F \u0432\u0441\u0451 \u0442\u043E\u0442 \u0436\u0435 \u0414\u0436\u0430\u0440\u0432\u0438\u0441")
             }
             cmd.contains("\u0645\u0627\u0646\u062F\u0631\u064A\u0646") || cmd.contains("\u0635\u064A\u0646\u064A") || cmd.contains("mandarin") ||
                     cmd.contains("chinese") || cmd.contains("\u4E2D\u6587") -> {
                 currentLangCode = "zh"
-                tts.language = Locale.SIMPLIFIED_CHINESE
+                configureJarvisVoice()
                 respond("\u597D\u7684\uFF0C\u73B0\u5728\u6211\u542C\u4E2D\u6587\u4E86\uFF0C\u6211\u8FD8\u662F\u8D3E\u7EF4\u65AF")
             }
             else -> {
@@ -1122,6 +1224,117 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     // ---------------- Jokes ----------------
+
+    // ---------------- Dynamic app scanner ----------------
+
+    private data class JarvisApp(
+        val name: String,
+        val packageName: String
+    )
+
+    private fun scanInstalledApps(): List<JarvisApp> {
+        val pm = packageManager
+
+        return pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            .mapNotNull { info ->
+                val launchIntent = pm.getLaunchIntentForPackage(info.packageName)
+                if (launchIntent == null) {
+                    null
+                } else {
+                    JarvisApp(
+                        name = info.loadLabel(pm).toString(),
+                        packageName = info.packageName
+                    )
+                }
+            }
+            .filter { it.name.isNotBlank() }
+            .distinctBy { it.packageName }
+            .sortedBy { it.name.lowercase(Locale.getDefault()) }
+    }
+
+    private fun findInstalledApp(requestedName: String): JarvisApp? {
+        val query = requestedName.trim().lowercase(Locale.getDefault())
+        if (query.isBlank()) return null
+
+        val apps = scanInstalledApps()
+
+        apps.firstOrNull { it.name.lowercase(Locale.getDefault()) == query }?.let { return it }
+        apps.firstOrNull { it.name.lowercase(Locale.getDefault()).contains(query) }?.let { return it }
+
+        return null
+    }
+
+    private fun launchDynamicApp(requestedName: String): Boolean {
+        val app = findInstalledApp(requestedName) ?: return false
+
+        return try {
+            val intent = packageManager.getLaunchIntentForPackage(app.packageName)
+                ?: return false
+
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+
+            respond(
+                when (currentLangCode) {
+                    "en" -> "Opening ${app.name}."
+                    "fr" -> "Ouverture de ${app.name}."
+                    else -> "\u062A\u0645 \u0641\u062A\u062D ${app.name}."
+                }
+            )
+
+            true
+        } catch (e: Exception) {
+            respond(
+                when (currentLangCode) {
+                    "en" -> "I couldn't open ${app.name}."
+                    "fr" -> "Impossible d'ouvrir ${app.name}."
+                    else -> "\u062A\u0639\u0630\u0631 \u0641\u062A\u062D ${app.name}."
+                }
+            )
+            true
+        }
+    }
+
+    private fun getInstalledAppNames(): List<String> {
+        return scanInstalledApps().map { it.name }.take(6)
+    }
+
+    private fun showAppsModule() {
+        val apps = getInstalledAppNames()
+        jarvisDial.setAppsModule(visible = true, apps = apps)
+    }
+
+    private fun hideAppsModule() {
+        jarvisDial.setAppsModule(visible = false)
+    }
+
+    private fun handleAppsIntent(intent: JarvisIntent): Boolean {
+        return when (intent.type) {
+            JarvisIntentType.APPS_SHOW -> {
+                showAppsModule()
+                respond(
+                    when (currentLangCode) {
+                        "en" -> "Applications module activated."
+                        "fr" -> "Module des applications active."
+                        else -> "\u062A\u0645 \u062A\u0641\u0639\u064A\u0644 \u0648\u062D\u062F\u0629 \u0627\u0644\u062A\u0637\u0628\u064A\u0642\u0627\u062A."
+                    }
+                )
+                true
+            }
+            JarvisIntentType.APPS_HIDE -> {
+                hideAppsModule()
+                respond(
+                    when (currentLangCode) {
+                        "en" -> "Applications module hidden."
+                        "fr" -> "Module des applications masque."
+                        else -> "\u062A\u0645 \u0625\u062E\u0641\u0627\u0621 \u0648\u062D\u062F\u0629 \u0627\u0644\u062A\u0637\u0628\u064A\u0642\u0627\u062A."
+                    }
+                )
+                true
+            }
+            else -> false
+        }
+    }
 
     private val jokes = listOf(
         "\u0648\u0627\u062D\u062F \u0633\u0623\u0644 \u0635\u0627\u062D\u0628\u0648: \u0639\u0644\u0627\u0634 \u0627\u0644\u062F\u064A\u0643 \u064A\u0635\u064A\u062D \u0627\u0644\u0635\u0628\u0627\u062D\u061F \u0642\u0627\u0644\u0647: \u0628\u0627\u0634 \u064A\u0641\u0648\u0642\u0643 \u0642\u0628\u0644 \u0645\u0627 \u062A\u0641\u0648\u062A\u0647 \u0628\u0627\u0644\u0646\u0648\u0645.",
@@ -1668,6 +1881,114 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2)
         val c = 2 * atan2(sqrt(a), sqrt(1 - a))
         return earthRadiusKm * c
+    }
+
+    // ---------------- Dynamic application launcher ----------------
+
+    private fun scanInstalledApps(): List<JarvisApp> {
+        val pm = packageManager
+        return pm.getInstalledApplications(PackageManager.GET_META_DATA)
+            .mapNotNull { info ->
+                val launchIntent = pm.getLaunchIntentForPackage(info.packageName)
+                if (launchIntent == null) {
+                    null
+                } else {
+                    JarvisApp(
+                        name = info.loadLabel(pm).toString(),
+                        packageName = info.packageName
+                    )
+                }
+            }
+            .filter { it.name.isNotBlank() }
+            .distinctBy { it.packageName }
+            .sortedBy { it.name.lowercase(Locale.getDefault()) }
+    }
+
+    private fun findInstalledApp(requestedName: String): JarvisApp? {
+        val query = requestedName.trim().lowercase(Locale.getDefault())
+        if (query.isBlank()) return null
+
+        val apps = scanInstalledApps()
+
+        apps.firstOrNull { it.name.lowercase(Locale.getDefault()) == query }
+            ?.let { return it }
+
+        apps.firstOrNull { it.name.lowercase(Locale.getDefault()).contains(query) }
+            ?.let { return it }
+
+        return null
+    }
+
+    private fun launchDynamicApp(requestedName: String): Boolean {
+        val app = findInstalledApp(requestedName) ?: return false
+
+        return try {
+            val intent = packageManager.getLaunchIntentForPackage(app.packageName)
+                ?: return false
+
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+
+            respond(
+                when (currentLangCode) {
+                    "en" -> "Opening ${app.name}."
+                    "fr" -> "Ouverture de ${app.name}."
+                    else -> "\u062A\u0645 \u0641\u062A\u062D ${app.name}."
+                }
+            )
+
+            true
+        } catch (e: Exception) {
+            respond(
+                when (currentLangCode) {
+                    "en" -> "I couldn't open ${app.name}."
+                    "fr" -> "Impossible d'ouvrir ${app.name}."
+                    else -> "\u062A\u0639\u0630\u0631 \u0641\u062A\u062D ${app.name}."
+                }
+            )
+            true
+        }
+    }
+
+    private fun getInstalledAppNames(): List<String> {
+        return scanInstalledApps().map { it.name }.take(6)
+    }
+
+    private fun showAppsModule() {
+        val apps = getInstalledAppNames()
+        jarvisDial.setAppsModule(visible = true, apps = apps)
+    }
+
+    private fun hideAppsModule() {
+        jarvisDial.setAppsModule(visible = false)
+    }
+
+    private fun handleAppsIntent(intent: JarvisIntent): Boolean {
+        return when (intent.type) {
+            JarvisIntentType.APPS_SHOW -> {
+                showAppsModule()
+                respond(
+                    when (currentLangCode) {
+                        "en" -> "Applications module activated."
+                        "fr" -> "Module des applications activ\u00e9."
+                        else -> "\u062A\u0645 \u062A\u0641\u0639\u064A\u0644 \u0648\u062D\u062F\u0629 \u0627\u0644\u062A\u0637\u0628\u064A\u0642\u0627\u062A."
+                    }
+                )
+                true
+            }
+            JarvisIntentType.APPS_HIDE -> {
+                hideAppsModule()
+                respond(
+                    when (currentLangCode) {
+                        "en" -> "Applications module hidden."
+                        "fr" -> "Module des applications masqu\u00e9."
+                        else -> "\u062A\u0645 \u0625\u062E\u0641\u0627\u0621 \u0648\u062D\u062F\u0629 \u0627\u0644\u062A\u0637\u0628\u064A\u0642\u0627\u062A."
+                    }
+                )
+                true
+            }
+            else -> false
+        }
     }
 
     // ---------------- Output helpers ----------------
